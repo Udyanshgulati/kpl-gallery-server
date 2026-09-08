@@ -1,0 +1,18 @@
+{
+  "name": "kpl-gallery-server",
+  "version": "1.0.0",
+  "description": "KPL-only: upload, auto-optimize (WebP), and serve Korfball Premier League gallery photos. Standalone service — not linked to any Thoda Logic media server.",
+  "main": "gallery-server.js",
+  "scripts": {
+    "start": "node gallery-server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.33.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

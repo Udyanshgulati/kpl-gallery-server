@@ -1,0 +1,11 @@
+node_modules
+media
+.git
+.gitignore
+*.log
+.env
+.env.local
+.DS_Store
+KPLGalleryPage.tsx
+KPLGalleryPreview.tsx
+DEPLOY.md

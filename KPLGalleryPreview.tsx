@@ -1,0 +1,351 @@
+// ─────────────────────────────────────────────────────────────
+// KPLGalleryPreview — Homepage gallery teaser
+// v2: fits in ONE viewport on desktop/tablet/phone + fetches
+//     the photo list from your own media server (no Framer CMS
+//     dependency, no per-device breakage from fixed row heights)
+// ─────────────────────────────────────────────────────────────
+//
+// ── WHY THIS CHANGED FROM v1 ─────────────────────────────────
+// v1 used fixed 200px row heights → on phones/small tablets the
+// grid either overflowed the screen or left a huge gap.
+//
+// v2 FIX: this component does NOT set its own height anymore.
+// It fills 100% of whatever Frame you place it in on the Framer
+// canvas. To make it "fit one viewport", set the FRAME's height
+// (not the component's) using vh units in Framer's right panel —
+// and set a DIFFERENT vh value per breakpoint (desktop/tablet/
+// phone tabs at the top of the canvas). That's Framer's native
+// responsive sizing system, and it's what was fighting the old
+// dvh-based height calc inside the component, causing the empty
+// gap you saw below the grid.
+//
+// Recommended Frame heights per breakpoint (right panel → Size):
+//   Desktop:  55vh
+//   Tablet:   50vh
+//   Phone:    45vh
+// Adjust to taste — the grid inside will always fill whatever
+// height the Frame has, on every device, no gap, no overflow.
+//
+// ── SERVER-DRIVEN GALLERY ────────────────────────────────────
+// Instead of manually uploading 5 images in the Framer panel,
+// this fetches a JSON list from `apiUrl` (your own server —
+// see gallery-server.js). Point it at:
+//   https://media.korfballpremierleague.com/api/gallery
+// That endpoint always returns the CURRENT, already-optimized
+// (WebP, resized) photo URLs. Upload/delete on the server and
+// this component picks it up automatically — no Framer publish
+// needed. The `images` prop is kept as a manual fallback/preview
+// only (used if the fetch fails or apiUrl is empty).
+// ─────────────────────────────────────────────────────────────
+
+import { addPropertyControls, ControlType } from "framer"
+import { useState, useEffect } from "react"
+
+interface Props {
+    apiUrl: string
+    images: string[]
+    previewCount: number
+    galleryUrl: string
+    viewMoreLabel: string
+    heading: string
+    accentColor: string
+    btnBg: string
+    btnTextColor: string
+    gap: number
+    borderRadius: number
+    width: number
+}
+
+const SAMPLE = [
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&q=80",
+    "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?w=800&q=80",
+    "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800&q=80",
+    "https://images.unsplash.com/photo-1546961342-ea5f60b193e3?w=800&q=80",
+    "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=800&q=80",
+]
+
+function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+    return (
+        <div
+            onClick={onClose}
+            style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 9999,
+                background: "rgba(5,8,20,0.97)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily: "system-ui",
+            }}
+        >
+            <style>{`@keyframes imgIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}`}</style>
+            <button
+                onClick={onClose}
+                style={{
+                    position: "absolute",
+                    top: 16,
+                    right: 16,
+                    width: 38,
+                    height: 38,
+                    borderRadius: "50%",
+                    background: "rgba(255,255,255,0.09)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    color: "#fff",
+                    fontSize: 20,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                }}
+            >
+                ×
+            </button>
+            <img
+                src={src}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                    maxWidth: "92vw",
+                    maxHeight: "92vh",
+                    objectFit: "contain",
+                    borderRadius: 10,
+                    animation: "imgIn 0.15s ease",
+                    boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
+                    display: "block",
+                }}
+            />
+        </div>
+    )
+}
+
+function Cell({
+    src,
+    gridStyle,
+    borderRadius,
+    onClick,
+}: {
+    src: string
+    gridStyle?: React.CSSProperties
+    borderRadius: number
+    onClick: () => void
+}) {
+    const [hov, setHov] = useState(false)
+    return (
+        <div
+            onClick={onClick}
+            onMouseEnter={() => setHov(true)}
+            onMouseLeave={() => setHov(false)}
+            style={{
+                borderRadius,
+                overflow: "hidden",
+                cursor: "pointer",
+                position: "relative",
+                background: "#eef1f9",
+                minHeight: 0, // critical: lets grid rows shrink instead of overflowing
+                ...gridStyle,
+            }}
+        >
+            <img
+                src={src}
+                alt=""
+                loading="lazy"
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    objectPosition: "center top",
+                    display: "block",
+                    transform: hov ? "scale(1.05)" : "scale(1)",
+                    transition:
+                        "transform 0.38s cubic-bezier(0.25,0.46,0.45,0.94)",
+                }}
+            />
+            <div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: `rgba(8,12,40,${hov ? 0.38 : 0})`,
+                    transition: "background 0.25s",
+                    pointerEvents: "none",
+                }}
+            />
+        </div>
+    )
+}
+
+export default function KPLGalleryPreview({
+    apiUrl = "https://media.korfballpremierleague.com/api/gallery",
+    images = SAMPLE,
+    previewCount = 5,
+    galleryUrl = "/gallery",
+    viewMoreLabel = "View all photos",
+    heading = "Inside KPL",
+    accentColor = "#213873",
+    btnBg = "#213873",
+    btnTextColor = "#ffffff",
+    gap = 6,
+    borderRadius = 10,
+    width = 900,
+}: Props) {
+    const [lightbox, setLightbox] = useState<string | null>(null)
+    const [fetched, setFetched] = useState<string[] | null>(null)
+
+    useEffect(() => {
+        if (!apiUrl) return
+        let cancelled = false
+        fetch(apiUrl)
+            .then((r) => r.json())
+            .then((list: string[]) => {
+                if (!cancelled && Array.isArray(list) && list.length > 0) {
+                    setFetched(list)
+                }
+            })
+            .catch(() => {
+                // silently keep fallback `images` prop on network/API failure
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [apiUrl])
+
+    const source = fetched ?? (images?.length > 0 ? images : SAMPLE)
+    const data = source.slice(0, previewCount)
+    const isMobile = width < 520
+    const first = data[0]
+    const rest = data.slice(1)
+
+    return (
+        <div
+            style={{
+                width: "100%",
+                // ── FILLS THE FRAME, DOESN'T SET ITS OWN HEIGHT ──
+                // Set the wrapping Frame's height (per breakpoint, in
+                // vh) from Framer's right panel — that's what makes
+                // this "fit one viewport". See notes at top of file.
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                fontFamily: "system-ui, sans-serif",
+            }}
+        >
+            {heading && (
+                <div style={{ marginBottom: 14, flexShrink: 0 }}>
+                    <div
+                        style={{
+                            fontSize: isMobile ? 20 : 26,
+                            fontWeight: 800,
+                            color: accentColor,
+                            letterSpacing: "-0.02em",
+                        }}
+                    >
+                        {heading}
+                    </div>
+                </div>
+            )}
+
+            {/* Preview grid — flex:1 fills whatever height is left inside
+                the clamped container, so rows are never fixed px values
+                that can overflow on short/small screens. */}
+            <div
+                style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: "grid",
+                    gridTemplateColumns: isMobile ? "1fr 1fr" : "1.6fr 1fr",
+                    gridTemplateRows: "1fr 1fr",
+                    gap,
+                }}
+            >
+                {first && (
+                    <Cell
+                        src={first}
+                        onClick={() => setLightbox(first)}
+                        borderRadius={borderRadius}
+                        gridStyle={isMobile ? {} : { gridRow: "1 / 3" }}
+                    />
+                )}
+                {rest.map((src, i) => (
+                    <Cell
+                        key={i}
+                        src={src}
+                        onClick={() => setLightbox(src)}
+                        borderRadius={borderRadius}
+                    />
+                ))}
+            </div>
+
+            {lightbox && (
+                <Lightbox src={lightbox} onClose={() => setLightbox(null)} />
+            )}
+        </div>
+    )
+}
+
+addPropertyControls(KPLGalleryPreview, {
+    apiUrl: {
+        type: ControlType.String,
+        title: "Gallery API URL",
+        defaultValue: "https://media.korfballpremierleague.com/api/gallery",
+        description:
+            "Fetches live, pre-optimized photo list from your server. Leave blank to use manual Images below.",
+    },
+    images: {
+        type: ControlType.Array,
+        title: "Images (fallback)",
+        control: { type: ControlType.Image },
+        description: "Only used if API fetch fails or apiUrl is blank.",
+    },
+    previewCount: {
+        type: ControlType.Number,
+        title: "Preview count",
+        defaultValue: 5,
+        min: 3,
+        max: 8,
+        step: 1,
+        displayStepper: true,
+    },
+    heading: {
+        type: ControlType.String,
+        title: "Heading",
+        defaultValue: "Inside KPL",
+    },
+    galleryUrl: {
+        type: ControlType.String,
+        title: "Gallery page URL",
+        defaultValue: "/gallery",
+    },
+    viewMoreLabel: {
+        type: ControlType.String,
+        title: "Button label",
+        defaultValue: "View all photos",
+    },
+    btnBg: { type: ControlType.Color, title: "Button bg", defaultValue: "#213873" },
+    btnTextColor: {
+        type: ControlType.Color,
+        title: "Button text",
+        defaultValue: "#ffffff",
+    },
+    gap: {
+        type: ControlType.Number,
+        title: "Gap",
+        defaultValue: 6,
+        min: 0,
+        max: 16,
+        step: 1,
+        displayStepper: true,
+    },
+    borderRadius: {
+        type: ControlType.Number,
+        title: "Corner radius",
+        defaultValue: 10,
+        min: 0,
+        max: 20,
+        step: 2,
+        displayStepper: true,
+    },
+    accentColor: {
+        type: ControlType.Color,
+        title: "Accent colour",
+        defaultValue: "#213873",
+    },
+})
