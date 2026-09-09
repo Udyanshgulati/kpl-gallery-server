@@ -21,6 +21,9 @@
  *      (KPLGalleryPage). Returns { total, hasMore, items }.
  * 4. DELETE /api/gallery/:id   (auth required)
  *    - Removes a photo (files + manifest entry)
+ * 5. GET /api/gallery/:id/download
+ *    - Public. Same full-size WebP, sent as an attachment so the
+ *      gallery's fullscreen "Download" button works cross-origin.
  *
  * FOLDER LAYOUT (all under MEDIA_ROOT — a KPL-only directory)
  *   gallery/grid/<id>.webp   (800px wide  — homepage grid)
@@ -142,6 +145,24 @@ app.get("/api/gallery/full", async (req, res) => {
             grid: `${PUBLIC_BASE}/media/gallery/grid/${item.id}.webp`,
             full: `${PUBLIC_BASE}/media/gallery/full/${item.id}.webp`,
         })),
+    })
+})
+
+// ── GET /api/gallery/:id/download — public, forces a file download ──
+// Serves the same optimized full-size WebP as /media, but with
+// Content-Disposition: attachment so the gallery's "Download" button
+// saves the file instead of opening it — works cross-origin (Framer
+// site → this server) where a plain <a download> link would not.
+app.get("/api/gallery/:id/download", async (req, res) => {
+    const { id } = req.params
+    if (!/^[0-9a-f-]{36}$/i.test(id)) {
+        return res.status(400).json({ error: "bad id" })
+    }
+    const { full } = await galleryDirs()
+    res.download(path.join(full, `${id}.webp`), `kpl-${id}.webp`, (err) => {
+        if (err && !res.headersSent) {
+            res.status(404).json({ error: "not found" })
+        }
     })
 })
 

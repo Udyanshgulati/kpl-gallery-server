@@ -35,7 +35,29 @@ interface Props {
     noMoreLabel: string
 }
 
+// Turn a media URL (…/media/gallery/grid|full/<id>.webp) into the
+// server's attachment endpoint, so "Download" actually saves the file
+// cross-origin. Falls back to the raw src for anything unexpected.
+function downloadHrefFor(src: string) {
+    const m = src.match(
+        /^(https?:\/\/[^/]+)\/media\/gallery\/(?:grid|full)\/([0-9a-f-]{36})\.webp/i
+    )
+    return m ? `${m[1]}/api/gallery/${m[2]}/download` : src
+}
+
 function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+    const ctrlBtn: React.CSSProperties = {
+        height: 38,
+        borderRadius: 999,
+        background: "rgba(255,255,255,0.09)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        color: "#fff",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "system-ui",
+    }
     return (
         <div
             onClick={onClose}
@@ -51,24 +73,52 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
             }}
         >
             <style>{`@keyframes imgIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}`}</style>
-            <button
-                onClick={onClose}
+            <div
                 style={{
                     position: "absolute",
                     top: 16,
                     right: 16,
-                    width: 38,
-                    height: 38,
-                    borderRadius: "50%",
-                    background: "rgba(255,255,255,0.09)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    color: "#fff",
-                    fontSize: 20,
-                    cursor: "pointer",
+                    display: "flex",
+                    gap: 10,
+                    zIndex: 1,
                 }}
             >
-                ×
-            </button>
+                <a
+                    href={downloadHrefFor(src)}
+                    download
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        ...ctrlBtn,
+                        padding: "0 16px",
+                        gap: 7,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        textDecoration: "none",
+                    }}
+                >
+                    <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download
+                </a>
+                <button
+                    onClick={onClose}
+                    style={{ ...ctrlBtn, width: 38, fontSize: 20 }}
+                >
+                    ×
+                </button>
+            </div>
             <img
                 src={src}
                 onClick={(e) => e.stopPropagation()}
