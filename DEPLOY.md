@@ -1,5 +1,10 @@
 # KPL Gallery Server — Deployment Runbook
 
+> **STATUS: LIVE** since 2026-09-09 — https://media.korfballpremierleague.com
+> Deployed on the shared VPS `200.141.13.226` with full isolation from the
+> existing Thoda Logic service (`node /root/forh` on port 4000, untouched).
+> KPL app runs on **port 4010** (4000 was already taken). See "Deployed values".
+
 Standalone service for **https://media.korfballpremierleague.com**.
 Hard rule: **nothing** here touches Thoda Logic's Nginx config, SSL certs, or
 media folders. Separate server block, separate cert, separate directory,
@@ -8,17 +13,20 @@ stop and confirm first.
 
 ---
 
-## 0. Facts / decisions
+## 0. Deployed values
 
 | Thing | Value |
 |---|---|
-| Subdomain | `media.korfballpremierleague.com` |
-| App internal port | `4000` |
-| KPL-only media dir | `/var/www/kpl-media` (no shared parent with any TL media path) |
-| Nginx server block file | `/etc/nginx/sites-available/media.korfballpremierleague.com` (NEW file) |
-| Coolify app name | `kpl-gallery-server` |
-| GitHub repo | `Udyanshgulati/kpl-gallery-server` (pending confirmation) |
-| VPS | `200.141.13.226` (same as TL) **or** a new dedicated VPS — decision pending |
+| Subdomain | `media.korfballpremierleague.com` (Cloudflare A → `200.141.13.226`, proxied) |
+| App port (host + container) | **`4010`** (port 4000 belongs to the existing `node /root/forh`) |
+| KPL-only media dir | `/var/www/kpl-media` — bind-mounted into the container at the same path |
+| Nginx server block file | `/etc/nginx/sites-available/media.korfballpremierleague.com` (NEW file, symlinked into sites-enabled) |
+| TLS | Let's Encrypt via `certbot --nginx --cert-name media.korfballpremierleague.com` (separate lineage from `media.thodalogic.com`) |
+| Coolify | project `korfball-premier-league` / env `production` / app `kpl-gallery-server`, Dockerfile build pack |
+| GitHub repo | `Udyanshgulati/kpl-gallery-server` |
+| VPS | `200.141.13.226` (shared with Thoda Logic; KPL fully isolated by port + dir + nginx file + cert) |
+
+Env vars set in Coolify: `GALLERY_UPLOAD_KEY` (secret, held by owner), `GALLERY_PUBLIC_BASE=https://media.korfballpremierleague.com`, `PORT=4010`, `MEDIA_ROOT=/var/www/kpl-media`.
 
 ---
 
@@ -83,9 +91,9 @@ server {
         access_log off;
     }
 
-    # API -> Node app on 4000
+    # API -> Node app on 4010
     location /api/gallery {
-        proxy_pass http://127.0.0.1:4000;
+        proxy_pass http://127.0.0.1:4010;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
@@ -112,9 +120,9 @@ sudo certbot --nginx -d media.korfballpremierleague.com \
 - **Name:** `kpl-gallery-server`
 - **Source:** the GitHub repo from step 1
 - **Build pack:** Dockerfile (included in repo)
-- **Port (exposed / internal):** `4000`
-- **Domain in Coolify:** leave blank / `127.0.0.1:4000` — Nginx (step 4) is the
-  public entrypoint, Coolify only needs to publish the port on localhost.
+- **Ports exposes:** `4010`  •  **Port mappings:** `4010:4010`
+- **Domain in Coolify:** leave blank — Nginx (step 4) is the public entrypoint,
+  Coolify only needs to publish the port on localhost.
 - **Persistent storage / bind mount:** host `/var/www/kpl-media` → container
   `/var/www/kpl-media`
 
@@ -126,7 +134,7 @@ sudo certbot --nginx -d media.korfballpremierleague.com \
 |---|---|
 | `GALLERY_UPLOAD_KEY` | *(strong random secret — generated separately, shared with owner out of band)* |
 | `GALLERY_PUBLIC_BASE` | `https://media.korfballpremierleague.com` |
-| `PORT` | `4000` |
+| `PORT` | `4010` |
 | `MEDIA_ROOT` | `/var/www/kpl-media` |
 
 ---
