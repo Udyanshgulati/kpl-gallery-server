@@ -1,45 +1,35 @@
 // ─────────────────────────────────────────────────────────────
-// KPLGalleryPreview — Homepage gallery teaser
-// v2: fits in ONE viewport on desktop/tablet/phone + fetches
-//     the photo list from your own media server (no Framer CMS
-//     dependency, no per-device breakage from fixed row heights)
+// KPLGalleryPreview — Homepage gallery teaser (KPL-only)
 // ─────────────────────────────────────────────────────────────
+// Fetches the live, pre-optimized photo list from the KPL media
+// server and shows a "featured + 2×2" mosaic that always fills
+// whatever Frame height it's placed in (no fixed row heights, so
+// no overflow / no gap on any device).
 //
-// ── WHY THIS CHANGED FROM v1 ─────────────────────────────────
-// v1 used fixed 200px row heights → on phones/small tablets the
-// grid either overflowed the screen or left a huge gap.
+//   API:  https://media.korfballpremierleague.com/api/gallery
 //
-// v2 FIX: this component does NOT set its own height anymore.
-// It fills 100% of whatever Frame you place it in on the Framer
-// canvas. To make it "fit one viewport", set the FRAME's height
-// (not the component's) using vh units in Framer's right panel —
-// and set a DIFFERENT vh value per breakpoint (desktop/tablet/
-// phone tabs at the top of the canvas). That's Framer's native
-// responsive sizing system, and it's what was fighting the old
-// dvh-based height calc inside the component, causing the empty
-// gap you saw below the grid.
+// LAYOUT
+//   Desktop : big featured image on the left (full height) +
+//             up to 4 thumbnails as a 2×2 block on the right.
+//   Phone   : featured across the top + 2×2 below (3 equal rows).
+//   A photo that fails to load is dropped automatically instead
+//   of leaving a blank tile.
 //
-// Recommended Frame heights per breakpoint (right panel → Size):
-//   Desktop:  55vh
-//   Tablet:   50vh
-//   Phone:    45vh
-// Adjust to taste — the grid inside will always fill whatever
-// height the Frame has, on every device, no gap, no overflow.
+// SIZING
+//   This component does NOT set its own height — it fills 100% of
+//   its Frame. Set the Frame's height per breakpoint in vh from
+//   Framer's right panel (e.g. Desktop 55vh / Tablet 50vh /
+//   Phone 45vh).
 //
-// ── SERVER-DRIVEN GALLERY ────────────────────────────────────
-// Instead of manually uploading 5 images in the Framer panel,
-// this fetches a JSON list from `apiUrl` (your own server —
-// see gallery-server.js). Point it at:
-//   https://media.korfballpremierleague.com/api/gallery
-// That endpoint always returns the CURRENT, already-optimized
-// (WebP, resized) photo URLs. Upload/delete on the server and
-// this component picks it up automatically — no Framer publish
-// needed. The `images` prop is kept as a manual fallback/preview
-// only (used if the fetch fails or apiUrl is empty).
+// The fullscreen preview (tap any photo) has a Download button
+// that saves the full-size WebP via the server's attachment
+// endpoint (works even though Framer is a different origin).
+// The `images` prop is a manual fallback, used only if the fetch
+// fails or `apiUrl` is blank.
 // ─────────────────────────────────────────────────────────────
 
 import { addPropertyControls, ControlType } from "framer"
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 interface Props {
     apiUrl: string
@@ -64,14 +54,19 @@ const SAMPLE = [
     "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=800&q=80",
 ]
 
-// Turn a media URL (…/media/gallery/grid|full/<id>.webp) into the
-// server's attachment endpoint, so "Download" actually saves the file
-// cross-origin. Falls back to the raw src for anything unexpected.
+// …/media/gallery/grid|full/<id>.webp  →  …/api/gallery/<id>/download
+// so the "Download" button saves the file instead of just opening it
+// (a plain <a download> is ignored cross-origin).
 function downloadHrefFor(src: string) {
     const m = src.match(
         /^(https?:\/\/[^/]+)\/media\/gallery\/(?:grid|full)\/([0-9a-f-]{36})\.webp/i
     )
     return m ? `${m[1]}/api/gallery/${m[2]}/download` : src
+}
+
+// grid thumbnail URL → full-size URL for the fullscreen view
+function fullOf(src: string) {
+    return src.replace("/media/gallery/grid/", "/media/gallery/full/")
 }
 
 function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
@@ -167,14 +162,16 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
 function Cell({
     src,
-    gridStyle,
+    style,
     borderRadius,
     onClick,
+    onError,
 }: {
     src: string
-    gridStyle?: React.CSSProperties
+    style?: React.CSSProperties
     borderRadius: number
     onClick: () => void
+    onError: () => void
 }) {
     const [hov, setHov] = useState(false)
     return (
@@ -188,14 +185,15 @@ function Cell({
                 cursor: "pointer",
                 position: "relative",
                 background: "#eef1f9",
-                minHeight: 0, // critical: lets grid rows shrink instead of overflowing
-                ...gridStyle,
+                minHeight: 0, // lets grid rows shrink instead of overflowing
+                ...style,
             }}
         >
             <img
                 src={src}
                 alt=""
                 loading="lazy"
+                onError={onError}
                 style={{
                     width: "100%",
                     height: "100%",
@@ -211,7 +209,7 @@ function Cell({
                 style={{
                     position: "absolute",
                     inset: 0,
-                    background: `rgba(8,12,40,${hov ? 0.38 : 0})`,
+                    background: `rgba(8,12,40,${hov ? 0.34 : 0})`,
                     transition: "background 0.25s",
                     pointerEvents: "none",
                 }}
@@ -236,6 +234,8 @@ export default function KPLGalleryPreview({
 }: Props) {
     const [lightbox, setLightbox] = useState<string | null>(null)
     const [fetched, setFetched] = useState<string[] | null>(null)
+    const [broken, setBroken] = useState<Record<string, boolean>>({})
+    const [mqNarrow, setMqNarrow] = useState(false)
 
     useEffect(() => {
         if (!apiUrl) return
@@ -248,27 +248,58 @@ export default function KPLGalleryPreview({
                 }
             })
             .catch(() => {
-                // silently keep fallback `images` prop on network/API failure
+                // keep the fallback `images` prop on network/API failure
             })
         return () => {
             cancelled = true
         }
     }, [apiUrl])
 
+    // Responsive without relying on Framer passing a real `width`.
+    useEffect(() => {
+        if (typeof window === "undefined" || !window.matchMedia) return
+        const mq = window.matchMedia("(max-width: 600px)")
+        const on = () => setMqNarrow(mq.matches)
+        on()
+        mq.addEventListener?.("change", on)
+        return () => mq.removeEventListener?.("change", on)
+    }, [])
+
     const source = fetched ?? (images?.length > 0 ? images : SAMPLE)
-    const data = source.slice(0, previewCount)
-    const isMobile = width < 520
+    const data = useMemo(
+        () =>
+            source
+                .filter((s) => !broken[s])
+                .slice(0, Math.max(3, previewCount)),
+        [source, broken, previewCount]
+    )
+
+    const isMobile = mqNarrow || width < 520
     const first = data[0]
-    const rest = data.slice(1)
+    const rest = data.slice(1, 5) // mosaic right side holds up to 4
+
+    const markBroken = (s: string) =>
+        setBroken((b) => (b[s] ? b : { ...b, [s]: true }))
+
+    const gridStyle: React.CSSProperties = isMobile
+        ? {
+              gridTemplateColumns: "1fr 1fr",
+              gridTemplateRows: "1fr 1fr 1fr",
+          }
+        : {
+              gridTemplateColumns:
+                  rest.length >= 3 ? "1.7fr 1fr 1fr" : "1.6fr 1fr",
+              gridTemplateRows: "1fr 1fr",
+          }
+
+    const heroStyle: React.CSSProperties = isMobile
+        ? { gridColumn: "1 / 3", gridRow: "1 / 2" }
+        : { gridColumn: "1 / 2", gridRow: "1 / 3" }
 
     return (
         <div
             style={{
                 width: "100%",
-                // ── FILLS THE FRAME, DOESN'T SET ITS OWN HEIGHT ──
-                // Set the wrapping Frame's height (per breakpoint, in
-                // vh) from Framer's right panel — that's what makes
-                // this "fit one viewport". See notes at top of file.
                 height: "100%",
                 display: "flex",
                 flexDirection: "column",
@@ -276,13 +307,14 @@ export default function KPLGalleryPreview({
             }}
         >
             {heading && (
-                <div style={{ marginBottom: 14, flexShrink: 0 }}>
+                <div style={{ marginBottom: 12, flexShrink: 0 }}>
                     <div
                         style={{
-                            fontSize: isMobile ? 20 : 26,
+                            fontSize: "clamp(18px, 2.4vw, 26px)",
                             fontWeight: 800,
                             color: accentColor,
                             letterSpacing: "-0.02em",
+                            lineHeight: 1.15,
                         }}
                     >
                         {heading}
@@ -290,37 +322,31 @@ export default function KPLGalleryPreview({
                 </div>
             )}
 
-            {/* Preview grid — flex:1 fills whatever height is left inside
-                the clamped container, so rows are never fixed px values
-                that can overflow on short/small screens. */}
             <div
                 style={{
                     flex: 1,
                     minHeight: 0,
                     display: "grid",
-                    gridTemplateColumns: isMobile ? "1fr 1fr" : "1.6fr 1fr",
-                    gridTemplateRows: "1fr 1fr",
                     gap,
+                    ...gridStyle,
                 }}
             >
                 {first && (
                     <Cell
                         src={first}
-                        onClick={() =>
-                            setLightbox(first.replace("/grid/", "/full/"))
-                        }
+                        style={heroStyle}
                         borderRadius={borderRadius}
-                        gridStyle={isMobile ? {} : { gridRow: "1 / 3" }}
+                        onClick={() => setLightbox(fullOf(first))}
+                        onError={() => markBroken(first)}
                     />
                 )}
-                {rest.map((src, i) => (
+                {rest.map((src) => (
                     <Cell
-                        key={i}
+                        key={src}
                         src={src}
-                        onClick={() =>
-                            setLightbox(src.replace("/grid/", "/full/"))
-                        }
                         borderRadius={borderRadius}
+                        onClick={() => setLightbox(fullOf(src))}
+                        onError={() => markBroken(src)}
                     />
                 ))}
             </div>
@@ -354,6 +380,7 @@ addPropertyControls(KPLGalleryPreview, {
         max: 8,
         step: 1,
         displayStepper: true,
+        description: "Teaser shows 1 featured + up to 4 thumbnails.",
     },
     heading: {
         type: ControlType.String,
@@ -370,7 +397,11 @@ addPropertyControls(KPLGalleryPreview, {
         title: "Button label",
         defaultValue: "View all photos",
     },
-    btnBg: { type: ControlType.Color, title: "Button bg", defaultValue: "#213873" },
+    btnBg: {
+        type: ControlType.Color,
+        title: "Button bg",
+        defaultValue: "#213873",
+    },
     btnTextColor: {
         type: ControlType.Color,
         title: "Button text",
